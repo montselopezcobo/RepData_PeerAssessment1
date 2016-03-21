@@ -1,25 +1,142 @@
 ---
 title: "Reproducible Research: Peer Assessment 1"
+author: "Montserrat López Cobo"
+date: "21 March 2016"
 output: 
   html_document:
     keep_md: true
 ---
 
 
+```{r 1_setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, tidy = TRUE, fig.keep = "high", dev="png", fig.path = "figure/")
+options(scipen = 1, digits = 2) #digits = número de decimales
+```
+
+```{r 2_libraries, message=FALSE}
+#--- Libraries ---------
+require(dplyr)
+require(lubridate)
+require(ggplot2)
+```
+
+
 ## Loading and preprocessing the data
 
 
+```{r 2_folders, echo = FALSE, eval= TRUE}
+setwd("~/coursera/00_Assignments/05_Reproducible_Research/CourseProject1/RepData_PeerAssessment1")
+if (!file.exists("./Data")) {dir.create("./Data")}
+if (!file.exists("./figure")) {dir.create("./figure")}
+```
+
+
+```{r 3_read_process_data}
+data <- read.csv("./Data/activity.csv")
+summary(data)
+str(data)
+colSums(is.na(data))
+```
+
+From the summary we can see that the variable *steps* has NA in 2304 cases. I will ignore them for the first part of the assignment.
 
 ## What is mean total number of steps taken per day?
 
+To make the histogram I remove the days in which any interval does not have a corresponding steps numbers.
+
+```{r 4_histogram}
+
+stepsDay <- data %>%
+            group_by(date) %>%
+            summarise(Total_steps = sum(steps)) %>%
+            filter(!is.na(Total_steps))
+
+hist(stepsDay$Total_steps, breaks = 10, main="Histogram of total daily steps", xlab="total daily steps", col = "lightgreen")
+
+```
+
+
+```{r 5_mean}
+meanSteps <- mean(stepsDay$Total_steps)
+medianSteps <- median(stepsDay$Total_steps)
+```
+
+The mean number of steps per day is `r meanSteps`, and the median, `r medianSteps`.
 
 
 ## What is the average daily activity pattern?
 
+```{r 6_timeseries}
+stepsInterval <- data %>%
+                filter(!is.na(steps)) %>%
+                group_by(interval) %>%
+                summarise(Av_steps = mean(steps))
 
+plot(stepsInterval, type="l", main="Average number of steps by 5-minute interval", ylab="number of steps", xlab="5-minute interval", xaxt="n")
+axis(1, at=seq(0, 2300, by = 100), cex.axis=0.8)
+
+```
+
+The time series plot shows very low intensity until interval 500 (which corresponds to 5 am), which must be sleeping time, and a higher intensity for the rest of the day until 7 pm. There is a maximum around 8:30 in the morning, which might correspond to commuting time.  
+
+```{r 7_maxInterval}
+maxI <- stepsInterval[stepsInterval$Av_steps == max(stepsInterval$Av_steps), 1]
+```
+The 5-minute interval with highest average number of steps is `r maxI`.
 
 ## Imputing missing values
 
+First I isolate the cases with missing values in *steps* and try to find a pattern in missing data.
+```{r 8_imputation_a}
+missing <- data[is.na(data$steps),2:3]
+head(missing)
+tail(missing)
 
+# Plot the frequency of each interval to find patterns
+plot(table(missing$interval), type = "l")
+
+freqMissingInterval <- as.data.frame(table(missing$interval))
+table(freqMissingInterval$Freq)
+```
+
+I plot the frequency of each interval in the missing data, and appears to be a uniform frequency of 8 per each interval. This means that there are 8 complete days with no recording of number of steps. Therefore, a simple and logical strategy for imputation would be to apply to those days the average number of steps observed in each interval for the valid days.
+
+```{r 8_imputation_b}
+data_imputed <- data
+data_imputed[is.na(data_imputed$steps),1] <- rep(stepsInterval$Av_steps, 8)
+summary(data_imputed)
+```
+
+```{r 9_histogram}
+stepsDay_imputed <- data_imputed %>% group_by(date) %>% summarise(Total_steps = sum(steps)) %>% filter(!is.na(Total_steps))
+
+hist(stepsDay_imputed$Total_steps, breaks = 8, main="Histogram of total daily steps", xlab="total daily steps", border = "blue")
+
+par(new = TRUE)
+
+# Plot original histogram over imputed data histogram
+hist(stepsDay$Total_steps, breaks = 8, main="Histogram of total daily steps", xlab="total daily steps", border = "green")
+legend("topright", legend = c("original data", "imputed data"), col=c("green", "blue"), lty=1)
+```
+
+When plotting the imputed data we can see a similar histogram than before (blue histogram). But, if we compare with the original data where missing values were ignored (green histogram), we can observe a higher concentration of the imputed data around the mean. This is due to the use of the population mean as an estimation for the missing values. The mean and median of the imputed data set are `r mean(stepsDay_imputed$Total_steps)` and `r median(stepsDay_imputed$Total_steps)` respectively. The mean stays unchanged, but the median has shifted to the value of the mean. This is because with the imputation we have introduced in the variable *steps* many cases with this value.
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+```{r 10_panel_plot}
+# Create a factor variable showing whether the day is a weekday.
+data_imputed$weekday <- factor(ifelse(wday(data_imputed$date) %in% 2:6,"weekday","weekend"), levels = c("weekday","weekend"))
+data_imputed_wk <- data_imputed %>%
+                  group_by(weekday, interval) %>%
+                  summarise(Av_steps = mean(steps))
+
+g <- ggplot(data_imputed_wk, aes(interval, Av_steps))
+g <- g + facet_grid(.~weekday)
+g <- g + geom_line(col="blue")
+g <- g + labs(title = "Average number of steps during weekdays and weekends", xlab="5-minute interval", ylab="number of steps")
+g <- g + theme_bw()
+g
+```
+
+We can observe a different pattern in both groups. The maximum reached during weekdays has a higher frequency than the maximum reached during weekends. This finding supports the hypothesis of the commuting time around 8:35 am. Also, during weekends the number of steps is higher during the rest of the day, which might show activity during leisure activities.
+
